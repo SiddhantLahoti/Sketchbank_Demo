@@ -11,6 +11,7 @@ from ..services.embedding_service import (
     extract_vector_from_image,
     extract_vector_from_file_path,
     compute_cosine_similarity,
+    extract_vector_from_text
 )
 
 router = APIRouter(prefix="/api/similarity", tags=["Tab 5: Image Similarity"])
@@ -86,6 +87,56 @@ async def search_by_uploaded_image(
         "total_matches": len(results),
         "results": results[:limit],
     }
+
+@router.get("/search-by-text")
+def search_by_text_prompt(
+    q: str = Query(..., min_length=2, description="Natural language description of jewelry"),
+    main_category: Optional[str] = Query(None),
+    min_similarity: float = Query(0.10, ge=0.0, le=1.0),
+    limit: int = Query(24, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Searches catalog images using natural language via SigLIP 2."""
+    query_vec = extract_vector_from_text(q)
+
+    query = (
+        db.query(models.ProductEmbedding, models.CroppedProduct, models.ProductMetadata)
+        .join(models.CroppedProduct, models.ProductEmbedding.cropped_product_id == models.CroppedProduct.id)
+        .outerjoin(models.ProductMetadata, models.CroppedProduct.id == models.ProductMetadata.cropped_product_id)
+        .filter(models.CroppedProduct.status == "ACTIVE")
+    )
+
+    if main_category and main_category.strip():
+        query = query.filter(models.ProductMetadata.main_category == main_category.strip())
+
+    records = query.all()
+    if not records:
+        return {"total_matches": 0, "results": []}
+
+    catalog_matrix = np.vstack([np.frombuffer(r[0].embedding_vector, dtype=np.float32) for r in records])
+    similarities = compute_cosine_similarity(query_vec, catalog_matrix)
+
+    results = []
+    for idx, score in enumerate(similarities):
+        match_score = float(score)
+        if match_score >= min_similarity:
+            _, cropped, meta = records[idx]
+            results.append({
+                "similarity_score": round(match_score * 100, 1),
+                "cropped_product_id": cropped.id,
+                "metadata_id": meta.id if meta else None,
+                "style_number": meta.style_number if meta else "Draft",
+                "sketch_number": meta.sketch_number if meta else "",
+                "main_category": meta.main_category if meta else "Uncategorized",
+                "metal_type": meta.metal_type if meta else "",
+                "diamond_type": meta.diamond_type if meta else "",
+                "creative_designer": meta.creative_designer if meta else "",
+                "customer_name": meta.customer_name if meta else "",
+                "image_url": f"/storage/cropped_products/{os.path.basename(cropped.cropped_image_path)}",
+            })
+
+    results.sort(key=lambda x: x["similarity_score"], reverse=True)
+    return {"total_matches": len(results), "results": results[:limit]}
 
 
 @router.get("/by-product/{cropped_product_id}")
@@ -167,7 +218,7 @@ def backfill_missing_embeddings(db: Session = Depends(get_db)):
             record = models.ProductEmbedding(
                 cropped_product_id=crop.id,
                 embedding_vector=vector.tobytes(),
-                model_version="resnet18-v1",
+                model_version="siglip2-base-v1",
             )
             db.add(record)
             generated_count += 1

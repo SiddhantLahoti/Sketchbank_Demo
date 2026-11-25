@@ -159,7 +159,7 @@ def submit_metadata(payload: SubmitCockpitMetadata, db: Session = Depends(get_db
                     models.ProductEmbedding(
                         cropped_product_id=cropped.id,
                         embedding_vector=vector.tobytes(),
-                        model_version="resnet18-v1",
+                        model_version="siglip2-base-v1",
                     )
                 )
             except Exception as e:

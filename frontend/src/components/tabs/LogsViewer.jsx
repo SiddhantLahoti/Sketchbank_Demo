@@ -1,51 +1,34 @@
-// frontend/src/components/LogsViewer.tsx
-"use client";
-
 import React, { useState, useEffect } from "react";
-import { ShieldCheck, Search, Filter, RotateCcw, Clock, User, FileText } from "lucide-react";
+import { ShieldCheck, Search, RotateCcw, User } from "lucide-react";
+import { api } from "../../services/api";
 
-interface AuditLogItem {
-  id: number;
-  user_id: number | null;
-  username: string;
-  action: string;
-  style_number: string;
-  details: string;
-  created_at: string;
-}
-
-export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
-  const [logs, setLogs] = useState<AuditLogItem[]>([]);
+export default function LogsViewer() {
+  const [logs, setLogs] = useState([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const limit = 20;
 
-  // Filters
   const [queryText, setQueryText] = useState("");
   const [selectedAction, setSelectedAction] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
-  const [availableActions, setAvailableActions] = useState<string[]>([]);
-  const [availableUsers, setAvailableUsers] = useState<string[]>([]);
+  const [availableActions, setAvailableActions] = useState([]);
+  const [availableUsers, setAvailableUsers] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      params.append("page", String(page));
-      params.append("limit", String(limit));
-      if (queryText.trim()) params.append("q", queryText.trim());
-      if (selectedAction) params.append("action", selectedAction);
-      if (selectedUser) params.append("username", selectedUser);
-
-      const res = await fetch(`${backendUrl}/api/logs?${params.toString()}`);
-      if (res.ok) {
-        const json = await res.json();
-        setLogs(json.logs || []);
-        setTotalCount(json.total || 0);
-        if (json.available_actions?.length > 0) setAvailableActions(json.available_actions);
-        if (json.available_users?.length > 0) setAvailableUsers(json.available_users);
-      }
+      const json = await api.getAuditLogs({
+        page,
+        limit,
+        q: queryText.trim(),
+        action: selectedAction,
+        username: selectedUser,
+      });
+      setLogs(json.logs || []);
+      setTotalCount(json.total || 0);
+      if (json.available_actions?.length > 0) setAvailableActions(json.available_actions);
+      if (json.available_users?.length > 0) setAvailableUsers(json.available_users);
     } catch (err) {
       console.error("Error loading audit logs:", err);
     } finally {
@@ -62,7 +45,7 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
       fetchLogs();
     }, 250);
     return () => clearTimeout(timer);
-  }, [page, queryText, selectedAction, selectedUser, backendUrl]);
+  }, [page, queryText, selectedAction, selectedUser]);
 
   const resetFilters = () => {
     setQueryText("");
@@ -71,7 +54,7 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
     setPage(1);
   };
 
-  const getActionBadge = (action: string) => {
+  const getActionBadge = (action) => {
     switch (action) {
       case "ACTIVATE_SKETCH":
         return <span className="bg-blue-50 border border-blue-200 text-[#2563EB] px-2 py-0.5 rounded text-[10px] font-bold">ACTIVATE_SKETCH</span>;
@@ -88,7 +71,7 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
 
   return (
     <div className="flex flex-col gap-5 max-w-[1700px] w-full mx-auto">
-      {/* ════════════ HEADER & SEARCH BAR ════════════ */}
+      {/* HEADER & SEARCH BAR */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div>
@@ -105,7 +88,6 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
 
         {/* Filter Controls Row */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-center">
-          {/* Universal Search */}
           <div className="sm:col-span-2 relative">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
@@ -117,7 +99,6 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
             />
           </div>
 
-          {/* Action Filter */}
           <div>
             <select
               value={selectedAction}
@@ -133,7 +114,6 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
             </select>
           </div>
 
-          {/* User Filter + Reset Button */}
           <div className="flex items-center gap-2">
             <select
               value={selectedUser}
@@ -159,7 +139,7 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
         </div>
       </div>
 
-      {/* ════════════ LOGS AUDIT TABLE ════════════ */}
+      {/* LOGS AUDIT TABLE */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -188,28 +168,19 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
               ) : (
                 logs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/75 transition">
-                    {/* Timestamp */}
                     <td className="py-3 px-4 whitespace-nowrap text-slate-500 font-mono text-[11px]">
                       {log.created_at ? new Date(log.created_at).toLocaleString() : "-"}
                     </td>
-
-                    {/* Action */}
                     <td className="py-3 px-4 whitespace-nowrap">{getActionBadge(log.action)}</td>
-
-                    {/* User */}
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className="font-bold text-slate-800 flex items-center gap-1.5">
                         <User className="w-3.5 h-3.5 text-slate-400" />
                         {log.username}
                       </span>
                     </td>
-
-                    {/* Style # */}
                     <td className="py-3 px-4 whitespace-nowrap">
                       <span className="font-mono font-bold text-[#2563EB]">{log.style_number}</span>
                     </td>
-
-                    {/* Narrative Details */}
                     <td className="py-3 px-4 text-slate-600 max-w-md truncate">
                       {log.details}
                     </td>
@@ -220,7 +191,7 @@ export default function LogsViewer({ backendUrl }: { backendUrl: string }) {
           </table>
         </div>
 
-        {/* ════════════ PAGINATION FOOTER ════════════ */}
+        {/* PAGINATION FOOTER */}
         {totalCount > limit && (
           <div className="p-4 border-t border-slate-100 flex items-center justify-between">
             <span className="text-xs text-slate-400">

@@ -36,6 +36,10 @@ app.include_router(logs.router)
 app.include_router(reports.router)  
 app.include_router(similarity.router)
 
+FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend/dist"))
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
+    
 @app.get("/")
 def read_root():
     return {"status": "online", "message": "Jewelry OS API is running"}

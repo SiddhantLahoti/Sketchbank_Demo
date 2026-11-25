@@ -79,8 +79,8 @@ def seed():
         db.commit()
 
         # Seed designers as login users
-        hashed_pwd = pwd_context.hash("sketch123")
-        for name in ["anurag", "sandip"]:
+        hashed_pwd = pwd_context.hash("diwali")
+        for name in ["anurag", "sandip","ayushi"]:
             if not db.query(models.User).filter_by(username=name).first():
                 db.add(models.User(username=name, email=f"{name}@company.com", hashed_password=hashed_pwd, role_id=des_role.id))
 

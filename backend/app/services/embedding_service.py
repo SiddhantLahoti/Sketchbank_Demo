@@ -2,50 +2,53 @@
 import io
 import os
 import torch
-import torchvision.models as models
-import torchvision.transforms as transforms
-from PIL import Image
 import numpy as np
+from PIL import Image
+from transformers import AutoProcessor, AutoModel
 
-# 1. Image Preprocessing Pipeline
-preprocess = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    ),
-])
-
-# 2. Singleton Model Loader (ResNet-18 Feature Extractor)
+MODEL_ID = "google/siglip2-base-patch16-224"
 _model = None
+_processor = None
 
-def get_vision_model():
-    global _model
-    if _model is None:
-        # Load weights and strip final classification layer to get raw features
-        weights = models.ResNet18_Weights.DEFAULT
-        resnet = models.resnet18(weights=weights)
-        resnet.fc = torch.nn.Identity()
-        resnet.eval()
-        _model = resnet
-    return _model
+def get_siglip2():
+    global _model, _processor
+    if _model is None or _processor is None:
+        _processor = AutoProcessor.from_pretrained(MODEL_ID)
+        _model = AutoModel.from_pretrained(MODEL_ID)
+        _model.eval()
+    return _model, _processor
 
 def extract_vector_from_image(image_bytes: bytes) -> np.ndarray:
-    """Extracts a normalized 512-dim feature vector from raw image bytes."""
-    model = get_vision_model()
+    """Extracts a normalized 768-dim SigLIP 2 vector from raw image bytes."""
+    model, processor = get_siglip2()
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    tensor = preprocess(image).unsqueeze(0)  # Shape: [1, 3, 224, 224]
+    inputs = processor(images=image, return_tensors="pt")
 
     with torch.no_grad():
-        features = model(tensor).squeeze().numpy()  # Shape: [512]
+        outputs = model.get_image_features(**inputs)
+        features = outputs if isinstance(outputs, torch.Tensor) else outputs.pooler_output
+        features = features / features.norm(dim=-1, keepdim=True)
 
-    # Normalize vector to unit length for fast cosine similarity
-    norm = np.linalg.norm(features)
-    if norm > 0:
-        features = features / norm
-    return features.astype(np.float32)
+    return features.squeeze().cpu().numpy().astype(np.float32)
+
+def extract_vector_from_text(query_text: str) -> np.ndarray:
+    """Extracts a normalized 768-dim SigLIP 2 vector from a natural language prompt."""
+    model, processor = get_siglip2()
+    clean_text = query_text.strip().lower()
+    inputs = processor(
+        text=[clean_text],
+        padding="max_length",
+        max_length=64,
+        truncation=True,
+        return_tensors="pt",
+    )
+
+    with torch.no_grad():
+        outputs = model.get_text_features(**inputs)
+        features = outputs if isinstance(outputs, torch.Tensor) else outputs.pooler_output
+        features = features / features.norm(dim=-1, keepdim=True)
+
+    return features.squeeze().cpu().numpy().astype(np.float32)
 
 def extract_vector_from_file_path(file_path: str) -> np.ndarray:
     """Extracts a normalized 512-dim vector from a file on disk."""

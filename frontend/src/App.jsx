@@ -1,70 +1,48 @@
-// frontend/src/app/page.tsx
-"use client";
-
 import React, { useState, useEffect } from "react";
-import Navbar from "@/components/Navbar";
-import Tab1Upload from "@/components/Tab1Upload";
-import TextualSearch from "@/components/TextualSearch";
-import ProductivityReport from "@/components/ProductivityReport";
-import LogsViewer from "@/components/LogsViewer";
-import ImageSimilarity from "@/components/ImageSimilarity";
+import { api } from "./services/api";
+import Navbar from "./components/common/Navbar";
+import Tab1Upload from "./components/tabs/Tab1Upload";
+import TextualSearch from "./components/tabs/TextualSearch";
+import ImageSimilarity from "./components/tabs/ImageSimilarity";
+import ProductivityReport from "./components/tabs/ProductivityReport";
+import LogsViewer from "./components/tabs/LogsViewer";
 
-interface UserSession {
-  user_id: number;
-  username: string;
-  email: string;
-  role: string;
-}
+const TABS = [
+  "New Sketch Upload",
+  "Backlog Upload",
+  "Textual Search",
+  "Image Similarity",
+  "Productivity Report",
+  "Logs",
+  "My Profile",
+];
 
-export default function HomePage() {
-  const [user, setUser] = useState<UserSession | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("New Sketch Upload");
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState("New Sketch Upload");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [backendUrl, setBackendUrl] = useState("http://localhost:8000");
-
-  const tabs = [
-    "New Sketch Upload",
-    // "Edit Details",
-    "Backlog Upload",
-    "Textual Search",
-    "Image Similarity",
-    "Productivity Report",
-    "Logs",
-    "My Profile",
-  ];
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setBackendUrl(`http://${window.location.hostname}:8000`);
-      const cached = localStorage.getItem("sketchbank_user");
-      if (cached) {
-        setUser(JSON.parse(cached));
-      }
+    const cached = localStorage.getItem("sketchbank_user");
+    if (cached) {
+      setUser(JSON.parse(cached));
     }
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      const res = await fetch(`${backendUrl}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Login failed");
-
+      const data = await api.login(username, password);
       setUser(data);
       localStorage.setItem("sketchbank_user", JSON.stringify(data));
       setActiveTab("New Sketch Upload");
-    } catch (err: any) {
+    } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
@@ -78,7 +56,7 @@ export default function HomePage() {
     setPassword("");
   };
 
-  // --- 1. LIGHT-THEMED LOGIN GATEKEEPER ---
+  // --- 1. LOGIN GATEKEEPER ---
   if (!user) {
     return (
       <main className="min-h-screen bg-[#f4f7fb] flex flex-col items-center justify-center p-6 text-slate-800">
@@ -139,39 +117,29 @@ export default function HomePage() {
     );
   }
 
-  // --- 2. MAIN APPLICATION WORKSPACE ---
+  // --- 2. MAIN WORKSPACE ---
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-800 flex flex-col">
       <Navbar
-        tabs={tabs}
+        tabs={TABS}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         user={user}
-        onLogout={handleLogout}
       />
 
       <main className="flex-1 max-w-[1700px] w-full mx-auto p-6 flex flex-col">
         {activeTab === "New Sketch Upload" ? (
-            <Tab1Upload
-              backendUrl={backendUrl}
-              userId={user.user_id}
-              username={user.username}
-            />
-          ) : activeTab === "Textual Search" ? (
-            <TextualSearch
-              backendUrl={backendUrl}
-              userId={user.user_id}
-              username={user.username}
-            />
-          ): activeTab === "Image Similarity" ? (
-            <ImageSimilarity backendUrl={backendUrl} />
-          ): activeTab === "Productivity Report" ? (
-            <ProductivityReport backendUrl={backendUrl} />
-          ) : activeTab === "Logs" ? (
-            <LogsViewer backendUrl={backendUrl} />
-          ): activeTab === "My Profile" ? (
-            /* Profile Tab */
-            <div className="max-w-md mx-auto w-full bg-white border border-slate-200 rounded-2xl p-8 space-y-6 shadow-sm">
+          <Tab1Upload userId={user.user_id} username={user.username} />
+        ) : activeTab === "Textual Search" ? (
+          <TextualSearch userId={user.user_id} username={user.username} />
+        ) : activeTab === "Image Similarity" ? (
+          <ImageSimilarity />
+        ) : activeTab === "Productivity Report" ? (
+          <ProductivityReport />
+        ) : activeTab === "Logs" ? (
+          <LogsViewer />
+        ) : activeTab === "My Profile" ? (
+          <div className="max-w-md mx-auto w-full bg-white border border-slate-200 rounded-2xl p-8 space-y-6 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">User Profile</h2>
@@ -205,15 +173,14 @@ export default function HomePage() {
             </button>
           </div>
         ) : (
-              /* Placeholder View for other tabs */
-              <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center bg-white shadow-sm">
-                <h2 className="text-2xl font-bold text-slate-800 mb-2">{activeTab}</h2>
-                <p className="text-sm text-slate-500 max-w-md">
-                  Screen container for <strong>{activeTab}</strong>.
-                </p>
-              </div>
-            )}
-          </main>
+          <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center bg-white shadow-sm">
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">{activeTab}</h2>
+            <p className="text-sm text-slate-500 max-w-md">
+              Screen container for <strong>{activeTab}</strong>.
+            </p>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

@@ -1,36 +1,17 @@
-// frontend/src/components/ProductivityReport.tsx
-"use client";
-
 import React, { useState, useEffect } from "react";
 import { TrendingUp, Clock, Award, Layers, Sparkles, RefreshCw, BarChart3, Users } from "lucide-react";
+import { api } from "../../services/api";
 
-interface ReportData {
-  time_range: string;
-  kpis: {
-    total_tagged: number;
-    pending_queue: number;
-    total_edits: number;
-    top_designer: string;
-  };
-  designer_leaderboard: { designer: string; count: number; share_pct: number }[];
-  category_breakdown: { category: string; count: number; share_pct: number }[];
-  customer_breakdown: { customer: string; count: number }[];
-  production_timeline: { date: string; count: number }[];
-}
-
-export default function ProductivityReport({ backendUrl }: { backendUrl: string }) {
-  const [timeRange, setTimeRange] = useState<"today" | "this_week" | "this_month" | "all_time">("this_month");
-  const [data, setData] = useState<ReportData | null>(null);
+export default function ProductivityReport() {
+  const [timeRange, setTimeRange] = useState("this_month");
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const fetchReport = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${backendUrl}/api/reports/productivity?time_range=${timeRange}`);
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      }
+      const json = await api.getProductivityReport({ time_range: timeRange });
+      setData(json);
     } catch (err) {
       console.error("Error loading productivity report:", err);
     } finally {
@@ -40,11 +21,11 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
 
   useEffect(() => {
     fetchReport();
-  }, [timeRange, backendUrl]);
+  }, [timeRange]);
 
   return (
     <div className="flex flex-col gap-6 max-w-[1700px] w-full mx-auto">
-      {/* ════════════ HEADER & TIMEFRAME SELECTOR ════════════ */}
+      {/* HEADER & TIMEFRAME SELECTOR */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-2xl px-6 py-4 shadow-xs">
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -64,7 +45,7 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setTimeRange(tab.id as any)}
+                onClick={() => setTimeRange(tab.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
                   timeRange === tab.id
                     ? "bg-white text-[#2563EB] shadow-xs"
@@ -86,16 +67,15 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
         </div>
       </div>
 
-      {/* ════════════ 4 TOP KPI CARDS ════════════ */}
+      {/* 4 TOP KPI CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Completed Tags */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
               Active Sketches Tagged
             </span>
             <span className="text-2xl font-black text-slate-900">
-              {loading ? "..." : data?.kpis.total_tagged || 0}
+              {loading ? "..." : data?.kpis?.total_tagged || 0}
             </span>
             <span className="text-[10px] text-emerald-600 font-bold block mt-1">Ready in Catalog</span>
           </div>
@@ -104,14 +84,13 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
           </div>
         </div>
 
-        {/* Card 2: Queue Backlog */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
               Queue Backlog
             </span>
             <span className="text-2xl font-black text-[#E11D48]">
-              {loading ? "..." : data?.kpis.pending_queue || 0}
+              {loading ? "..." : data?.kpis?.pending_queue || 0}
             </span>
             <span className="text-[10px] text-rose-500 font-bold block mt-1">Awaiting Metadata</span>
           </div>
@@ -120,14 +99,13 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
           </div>
         </div>
 
-        {/* Card 3: Metadata Revisions */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
               Total Edits / Updates
             </span>
             <span className="text-2xl font-black text-slate-900">
-              {loading ? "..." : data?.kpis.total_edits || 0}
+              {loading ? "..." : data?.kpis?.total_edits || 0}
             </span>
             <span className="text-[10px] text-slate-400 font-semibold block mt-1">Audit Log Recorded</span>
           </div>
@@ -136,14 +114,13 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
           </div>
         </div>
 
-        {/* Card 4: Top Designer */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
               Top Lead Designer
             </span>
             <span className="text-xl font-black text-[#2563EB] truncate block max-w-[150px]">
-              {loading ? "..." : data?.kpis.top_designer || "None"}
+              {loading ? "..." : data?.kpis?.top_designer || "None"}
             </span>
             <span className="text-[10px] text-blue-600 font-bold block mt-1">Highest Output Volume</span>
           </div>
@@ -153,9 +130,8 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
         </div>
       </div>
 
-      {/* ════════════ 2-COLUMN MAIN ANALYTICS GRID ════════════ */}
+      {/* 2-COLUMN MAIN ANALYTICS GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Designer Leaderboard (7 Cols) */}
         <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
@@ -168,11 +144,11 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
 
             {loading ? (
               <div className="text-center py-16 text-xs text-slate-400">Loading ranking...</div>
-            ) : data?.designer_leaderboard.length === 0 ? (
+            ) : data?.designer_leaderboard?.length === 0 ? (
               <div className="text-center py-16 text-xs text-slate-400">No output recorded for this period.</div>
             ) : (
               <div className="space-y-4">
-                {data?.designer_leaderboard.map((row, idx) => (
+                {(data?.designer_leaderboard || []).map((row, idx) => (
                   <div key={row.designer} className="space-y-1.5">
                     <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-800 flex items-center gap-2">
@@ -209,9 +185,7 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
           </div>
         </div>
 
-        {/* Right Column: Category Distribution & Customers (5 Cols) */}
         <div className="lg:col-span-5 flex flex-col gap-6">
-          {/* Category Distribution */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex-1">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -222,11 +196,11 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
 
             {loading ? (
               <div className="text-center py-8 text-xs text-slate-400">Loading...</div>
-            ) : data?.category_breakdown.length === 0 ? (
+            ) : data?.category_breakdown?.length === 0 ? (
               <div className="text-center py-8 text-xs text-slate-400">No category data.</div>
             ) : (
               <div className="space-y-3">
-                {data?.category_breakdown.map((cat) => (
+                {(data?.category_breakdown || []).map((cat) => (
                   <div key={cat.category} className="space-y-1">
                     <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-700">{cat.category}</span>
@@ -246,13 +220,12 @@ export default function ProductivityReport({ backendUrl }: { backendUrl: string 
             )}
           </div>
 
-          {/* Customer Scope Breakdown */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
             <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3 mb-3">
               Target Customers
             </h3>
             <div className="flex flex-wrap gap-2">
-              {data?.customer_breakdown.map((cust) => (
+              {(data?.customer_breakdown || []).map((cust) => (
                 <div
                   key={cust.customer}
                   className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center gap-2"
