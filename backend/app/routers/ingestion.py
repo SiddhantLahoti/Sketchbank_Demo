@@ -71,11 +71,12 @@ async def upload_file(
 
     page_results = []
     if ext == "pdf":
-        pages = convert_from_path(saved_file_path, dpi=200)
+        pages = convert_from_path(saved_file_path, dpi=150)
     else:
         pages = [Image.open(saved_file_path).convert("RGB")]
 
     for page_num, page_image in enumerate(pages, start=1):
+        print(f"[Ingestion] Detecting sketches on page {page_num}/{len(pages)}...")
         temp_page_name = f"{upload_record.id}_page_{page_num}.png"
         temp_page_path = os.path.normpath(os.path.join(TEMP_PAGES_DIR, temp_page_name))
         

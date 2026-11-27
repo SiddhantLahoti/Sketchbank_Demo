@@ -5,18 +5,35 @@ import torch
 import numpy as np
 from PIL import Image
 from transformers import AutoProcessor, AutoModel
+import glob
 
-MODEL_ID = "google/siglip2-base-patch16-224"
+# Point to your local folder (can be inside backend/, project root, or via .env)
+MODEL_CACHE_DIR = os.getenv(
+    "SIGLIP2_MODEL_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models--google--siglip2-so400m-patch14-384")),
+)
 _model = None
 _processor = None
+
+
+def _resolve_model_path(base_dir: str) -> str:
+    """Finds the snapshot folder inside a Hugging Face models--* cache directory."""
+    if os.path.exists(os.path.join(base_dir, "config.json")):
+        return base_dir
+    snapshots = glob.glob(os.path.join(base_dir, "snapshots", "*"))
+    if snapshots:
+        return snapshots[0]
+    raise FileNotFoundError(f"Could not find model snapshot inside: {base_dir}")
 
 def get_siglip2():
     global _model, _processor
     if _model is None or _processor is None:
-        _processor = AutoProcessor.from_pretrained(MODEL_ID)
-        _model = AutoModel.from_pretrained(MODEL_ID)
+        model_path = _resolve_model_path(MODEL_CACHE_DIR)
+        _processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
+        _model = AutoModel.from_pretrained(model_path, local_files_only=True)
         _model.eval()
     return _model, _processor
+
 
 def extract_vector_from_image(image_bytes: bytes) -> np.ndarray:
     """Extracts a normalized 768-dim SigLIP 2 vector from raw image bytes."""

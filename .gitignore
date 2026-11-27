@@ -16,6 +16,10 @@ backend/.env
 frontend/node_modules
 .env
 sketch_storage
+python-embed
+node-embed
+hf_model_cache
+Florence-2-base-ft
 
 # Ignore uploaded and generated Excel spreadsheets
 *.xlsx

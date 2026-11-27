@@ -104,6 +104,11 @@ export const api = {
     });
   },
 
+  getNextSerial() {
+    return request("/api/metadata/next-serial");
+  },
+
+
   // --- 4. TEXTUAL & CATALOG SEARCH ---
   searchProducts(filters = {}) {
     // filters: { q, main_category, category, metal_type, diamond_type, creative_designer, customer_name, market, is_exclusive, page, limit }
@@ -153,4 +158,31 @@ export const api = {
     const query = buildQuery(params);
     return request(`/api/logs${query}`);
   },
+
+  // --- 8. MASTER DATA MANAGEMENT ---
+  getMasterItems(entity) {
+    return request(`/api/masters/${entity}`);
+  },
+
+  createMasterItem(entity, payload) {
+    return request(`/api/masters/${entity}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateMasterItem(entity, id, payload) {
+    return request(`/api/masters/${entity}/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteMasterItem(entity, id) {
+    return request(`/api/masters/${entity}/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  
 };

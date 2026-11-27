@@ -1,24 +1,32 @@
 # backend/app/routers/metadata.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException , BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func, text
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 import uuid
-import os 
-from datetime import datetime , timezone 
-from ..database.database import get_db
-from ..database import models
+import os
+from datetime import datetime, date, timezone
+import re
+import threading
 
+from ..database.database import get_db , SessionLocal
+from ..database import models
 from ..services.embedding_service import extract_vector_from_file_path
 
 router = APIRouter(prefix="/api/metadata", tags=["Tab 1: Metadata & Queue"])
+
 
 class SubmitCockpitMetadata(BaseModel):
     cropped_product_id: int
     user_id: Optional[int] = None
     username: Optional[str] = "anurag"
-
+    is_backlog: bool = False
     sketch_number: Optional[str] = ""
+    auto_generate_sketch: bool = True
+    sketch_date: Optional[date] = None
+    grade: Optional[str] = None
+
     style_number: Optional[str] = ""
     initiation_type: Optional[str] = "Internal"
     initiation_trigger: Optional[str] = "Merchandiser"
@@ -44,7 +52,6 @@ class SubmitCockpitMetadata(BaseModel):
     total_weight_designer_2: Optional[str] = ""
     total_weight_2: Optional[float] = None
 
-    customer_name: Optional[str] = "Signet"
     customer_number: Optional[str] = ""
     market: Optional[str] = "USA"
     is_exclusive: bool = False
@@ -53,19 +60,118 @@ class SubmitCockpitMetadata(BaseModel):
     remarks: Optional[str] = ""
     assets: Optional[Dict[str, bool]] = {}
 
+
+def format_diamond_wt(wt: Optional[float]) -> str:
+    """Converts diamond weight (e.g. 0.50 -> '050', 1.25 -> '125')."""
+    if wt is None:
+        return "000"
+    return f"{int(round(wt * 100)):03d}"
+
+
+def build_sketch_number(
+    db: Session,
+    sketch_date: date,
+    main_category_name: str,
+    first_category_name: Optional[str],
+    serial_num: int,
+    diamond_weight: Optional[float],
+) -> str:
+    """Builds SM LD [YearChar][ProdCode][5DigitSerial]-[DiaWt][SalesCode]."""
+    year_offset = sketch_date.year - 2024
+    year_char = chr(max(ord("A"), ord("Z") - year_offset))
+
+    mc = db.query(models.MainCategory).filter_by(name=main_category_name).first()
+    prod_code = (mc.short_code or "") if mc else ""
+
+    sales_code = ""
+    if first_category_name and mc:
+        cat = (
+            db.query(models.Category)
+            .filter_by(name=first_category_name, main_category_id=mc.id)
+            .first()
+        )
+        sales_code = (cat.short_code or "") if cat else ""
+
+    dia_str = format_diamond_wt(diamond_weight)
+    return f"SM LD {year_char}{prod_code}{serial_num:05d}-{dia_str}{sales_code}"
+
+_embedding_lock = threading.Lock()
+
+def extract_serial_from_sketch(sketch_str: str, fallback: int) -> int:
+    """Extracts the 5-digit serial before '-' (e.g. 'SM LD ZE00006-050HP' -> 6)."""
+    match = re.search(r"(\d{5})-", sketch_str or "")
+    return int(match.group(1)) if match else fallback
+
+def generate_embedding_background(cropped_product_id: int, image_path: str):
+    """Runs SigLIP 2 sequentially in the background with its own DB session."""
+    if not image_path or not os.path.exists(image_path):
+        return
+    with _embedding_lock:
+        db = SessionLocal()
+        try:
+            exists = (
+                db.query(models.ProductEmbedding)
+                .filter_by(cropped_product_id=cropped_product_id)
+                .first()
+            )
+            if exists:
+                return
+            vector = extract_vector_from_file_path(image_path)
+            db.add(
+                models.ProductEmbedding(
+                    cropped_product_id=cropped_product_id,
+                    embedding_vector=vector.tobytes(),
+                    model_version="siglip2-so400m-v1",
+                )
+            )
+            db.commit()
+        except Exception as e:
+            print(f"Background embedding error for Crop #{cropped_product_id}: {e}")
+        finally:
+            db.close()
+            
+            
+@router.get("/next-serial")
+def get_next_serial(db: Session = Depends(get_db)):
+    """Returns the next serial integer for live UI preview."""
+    last_serial = db.query(func.max(models.ProductMetadata.serial_number)).scalar() or 0
+    return {"next_serial": last_serial + 1}
+
+
 @router.get("/dropdowns/master")
 def get_master_dropdowns(db: Session = Depends(get_db)):
-    """Fetches all dropdowns and cascade hierarchies directly from DB rows."""
+    """Fetches all dropdowns, cascade hierarchies, and short codes from DB."""
     cascade_tree = {}
-    main_cats = db.query(models.MainCategory).all()
+    main_category_codes = {}
+    category_codes = {}
+
+    main_cats = db.query(models.MainCategory).order_by(models.MainCategory.id.asc()).all()
 
     for mc in main_cats:
         cascade_tree[mc.name] = {}
-        # Query Category table directly using main_category_id
-        categories = db.query(models.Category).filter(models.Category.main_category_id == mc.id).all()
+        main_category_codes[mc.name] = mc.short_code or ""
+        category_codes[mc.name] = {}
+
+        categories = (
+            db.query(models.Category)
+            .filter(models.Category.main_category_id == mc.id)
+            .order_by(models.Category.id.asc())
+            .all()
+        )
         for cat in categories:
-            sub1 = [s.name for s in db.query(models.Subcategory1).filter(models.Subcategory1.category_id == cat.id).all()]
-            sub2 = [s.name for s in db.query(models.Subcategory2).filter(models.Subcategory2.category_id == cat.id).all()]
+            category_codes[mc.name][cat.name] = cat.short_code or ""
+            sub1 = [
+                s.name
+                for s in db.query(models.Subcategory1)
+                .filter(models.Subcategory1.category_id == cat.id)
+                .all()
+            ]
+            sub2 = [
+                s.name
+                for s in db.query(models.Subcategory2)
+                .filter(models.Subcategory2.category_id == cat.id)
+                .all()
+            ]
             cascade_tree[mc.name][cat.name] = {
                 "sub1": sub1,
                 "sub2": sub2,
@@ -74,6 +180,8 @@ def get_master_dropdowns(db: Session = Depends(get_db)):
     return {
         "cascade": cascade_tree,
         "main_categories": [mc.name for mc in main_cats],
+        "main_category_codes": main_category_codes,
+        "category_codes": category_codes,
         "metals": [m.name for m in db.query(models.MetalType).all()],
         "diamonds": [d.name for d in db.query(models.DiamondType).all()],
         "shapes": [s.name for s in db.query(models.Shape).all()],
@@ -81,8 +189,9 @@ def get_master_dropdowns(db: Session = Depends(get_db)):
         "colour_stones": [cs.name for cs in db.query(models.ColourStone).all()],
         "markets": [mkt.name for mkt in db.query(models.Market).all()],
         "designers": [des.name for des in db.query(models.Designer).all()],
-        "customers": [cust.name for cust in db.query(models.Customer).all()],  # <-- Added from DB
+        "customer_numbers": [cn.name for cn in db.query(models.CustomerNumber).all()],
     }
+
 
 @router.get("/pending-products")
 def get_pending_products(db: Session = Depends(get_db)):
@@ -99,23 +208,89 @@ def get_pending_products(db: Session = Depends(get_db)):
             "pdf_id": p.pdf_id,
             "page_number": p.page_number,
             "image_url": f"/storage/cropped_products/{p.cropped_image_path.split(os.sep)[-1]}",
-            "status": p.status
+            "status": p.status,
         }
         for p in pending
     ]
 
+
 @router.post("/submit")
-def submit_metadata(payload: SubmitCockpitMetadata, db: Session = Depends(get_db)):
-    """Saves the cockpit metadata, activates the sketch, generates visual embedding, and records the audit log."""
-    cropped = db.query(models.CroppedProduct).filter(models.CroppedProduct.id == payload.cropped_product_id).first()
+def submit_metadata(payload: SubmitCockpitMetadata,background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Saves metadata, generates multi-user-safe sketch number, activates sketch, and generates embedding."""
+    cropped = (
+        db.query(models.CroppedProduct)
+        .filter(models.CroppedProduct.id == payload.cropped_product_id)
+        .first()
+    )
     if not cropped:
         raise HTTPException(status_code=404, detail="Cropped sketch not found.")
 
-    final_style = payload.style_number.strip() if payload.style_number else f"ST-{uuid.uuid4().hex[:6].upper()}"
+    if not payload.is_backlog:
+        required_checks = {
+            "Sketch Date": payload.sketch_date,
+            "Grade": payload.grade,
+            "Initiation Trigger": payload.initiation_trigger,
+            "Creative Designer": payload.creative_designer,
+            "Concept Designer 1": payload.concept_designer_1,
+            "Main Category": payload.main_category,
+            "Category": payload.categories,
+            "Metal Type": payload.metal_type,
+            "Metal Weight": payload.metal_weight,
+            "Diamond Type": payload.diamond_type,
+            "Diamond Weight": payload.diamond_weight,
+            "Customer Number": payload.customer_number,
+            "Market": payload.market,
+        }
+        missing = [
+            label for label, val in required_checks.items()
+            if val is None or (isinstance(val, (str, list)) and len(val) == 0)
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing compulsory fields for daily upload: {', '.join(missing)}"
+            )
+            
+    # Lock table briefly so simultaneous LAN submissions get sequential serial numbers
+    db.execute(text("LOCK TABLE product_metadata IN SHARE ROW EXCLUSIVE MODE"))
+    last_serial = db.query(func.max(models.ProductMetadata.serial_number)).scalar() or 0
+    next_serial = last_serial + 1
+
+    effective_date = payload.sketch_date or date.today()
+    first_cat = payload.categories[0] if payload.categories else None
+
+    if payload.auto_generate_sketch or not (payload.sketch_number or "").strip():
+        final_sketch = build_sketch_number(
+            db=db,
+            sketch_date=effective_date,
+            main_category_name=payload.main_category,
+            first_category_name=first_cat,
+            serial_num=next_serial,
+            diamond_weight=payload.diamond_weight,
+        )
+        saved_serial = next_serial
+    else:
+        final_sketch = payload.sketch_number.strip()
+        saved_serial = extract_serial_from_sketch(final_sketch, next_serial)
+
+    # Check uniqueness before inserting
+    duplicate = db.query(models.ProductMetadata).filter_by(sketch_number=final_sketch).first()
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"Sketch number '{final_sketch}' already exists.")
+
+    final_style = (
+        payload.style_number.strip()
+        if payload.style_number
+        else f"ST-{uuid.uuid4().hex[:6].upper()}"
+    )
 
     metadata_entry = models.ProductMetadata(
         cropped_product_id=payload.cropped_product_id,
-        sketch_number=payload.sketch_number or f"SK-{cropped.id}",
+        serial_number=saved_serial,
+        sketch_number=final_sketch,
+        sketch_date=effective_date,
+        grade=payload.grade,
+        is_backlog=payload.is_backlog,
         style_number=final_style,
         initiation_type=payload.initiation_type,
         initiation_trigger=payload.initiation_trigger,
@@ -137,48 +312,38 @@ def submit_metadata(payload: SubmitCockpitMetadata, db: Session = Depends(get_db
         total_weight_1=payload.total_weight_1,
         total_weight_designer_2=payload.total_weight_designer_2,
         total_weight_2=payload.total_weight_2,
-        customer_name=payload.customer_name,
         customer_number=payload.customer_number,
         market=payload.market,
         is_exclusive=payload.is_exclusive,
         collection=payload.collection,
         remarks=payload.remarks,
-        assets=payload.assets
+        assets=payload.assets,
     )
 
     db.add(metadata_entry)
     cropped.status = "ACTIVE"
 
-    # Automatically generate visual vector embedding
-    if cropped.cropped_image_path and os.path.exists(cropped.cropped_image_path):
-        existing_emb = db.query(models.ProductEmbedding).filter_by(cropped_product_id=cropped.id).first()
-        if not existing_emb:
-            try:
-                vector = extract_vector_from_file_path(cropped.cropped_image_path)
-                db.add(
-                    models.ProductEmbedding(
-                        cropped_product_id=cropped.id,
-                        embedding_vector=vector.tobytes(),
-                        model_version="siglip2-base-v1",
-                    )
-                )
-            except Exception as e:
-                # Log warning so metadata submission succeeds even if image reading fails
-                print(f"Warning: Could not auto-generate embedding for Crop #{cropped.id}: {e}")
+    if cropped.cropped_image_path:
+        background_tasks.add_task(
+            generate_embedding_background, cropped.id, cropped.cropped_image_path
+        )
 
-    # Audit Trail
     audit = models.AuditLog(
         user_id=payload.user_id,
         username=payload.username,
         action="ACTIVATE_SKETCH",
         style_number=final_style,
-        details=f"Tagged {payload.main_category} sketch #{cropped.id}"
+        details=f"Tagged {payload.main_category} sketch #{cropped.id} ({final_sketch})",
     )
     db.add(audit)
 
     db.commit()
-    return {"message": "Success", "style_number": final_style, "id": metadata_entry.id}
-
+    return {
+        "message": "Success",
+        "sketch_number": final_sketch,
+        "style_number": final_style,
+        "id": metadata_entry.id,
+    }
 
 
 @router.put("/products/{metadata_id}")
@@ -187,13 +352,19 @@ def update_product_metadata(
     payload: SubmitCockpitMetadata,
     db: Session = Depends(get_db),
 ):
-    """Updates an existing active product's metadata and logs the audit trail."""
-    record = db.query(models.ProductMetadata).filter(models.ProductMetadata.id == metadata_id).first()
+    """Updates an existing active product's metadata (including exclusivity on Edit Details)."""
+    record = (
+        db.query(models.ProductMetadata)
+        .filter(models.ProductMetadata.id == metadata_id)
+        .first()
+    )
     if not record:
         raise HTTPException(status_code=404, detail="Product metadata not found.")
 
-    # Apply updates
     record.sketch_number = payload.sketch_number
+    if payload.sketch_date:
+        record.sketch_date = payload.sketch_date
+    record.grade = payload.grade
     record.style_number = payload.style_number
     record.initiation_type = payload.initiation_type
     record.initiation_trigger = payload.initiation_trigger
@@ -215,7 +386,6 @@ def update_product_metadata(
     record.total_weight_1 = payload.total_weight_1
     record.total_weight_designer_2 = payload.total_weight_designer_2
     record.total_weight_2 = payload.total_weight_2
-    record.customer_name = payload.customer_name
     record.customer_number = payload.customer_number
     record.market = payload.market
     record.is_exclusive = payload.is_exclusive
@@ -224,7 +394,6 @@ def update_product_metadata(
     record.assets = payload.assets
     record.updated_at = datetime.now(timezone.utc)
 
-    # Audit Trail
     audit = models.AuditLog(
         user_id=payload.user_id,
         username=payload.username,

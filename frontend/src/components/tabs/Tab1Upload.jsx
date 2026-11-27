@@ -1,9 +1,45 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api, getImageUrl } from "../../services/api";
 import MetadataForm, { getInitialMetadataForm } from "../common/MetadataForm";
+import ImageZoomModal from "../common/ImageZoomModal";
+const REQUIRED_DAILY_FIELDS = [
+  { key: "sketch_number", label: "Sketch Number" },
+  { key: "sketch_date", label: "Sketch Date" },
+  { key: "grade", label: "Grade" },
+  { key: "initiation_trigger", label: "Initiation Trigger" },
+  { key: "creative_designer", label: "Creative Designer" },
+  { key: "concept_designer_1", label: "Concept Designer 1" },
+  { key: "main_category", label: "Main Category" },
+  { key: "categories", label: "Category", isArray: true },
+  { key: "metal_type", label: "Metal Type" },
+  { key: "metal_weight", label: "Metal Weight" },
+  { key: "diamond_type", label: "Diamond Type" },
+  { key: "diamond_weight", label: "Diamond Weight" },
+  { key: "customer_number", label: "Customer Number" },
+  { key: "market", label: "Market" },
+];
+const DRAFT_STORAGE_KEY = "sketchbank_metadata_drafts";
+const SESSION_STORAGE_KEY = "sketchbank_upload_session";
+
+function readDrafts() {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
 
 export default function Tab1Upload({ userId, username }) {
-  const [subView, setSubView] = useState("upload"); // "upload" | "review" | "metadata"
+  const savedSession = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  const [mode, setMode] = useState(savedSession.mode || "backlog"); // Change "backlog" -> "daily" later
+  const [subView, setSubView] = useState(savedSession.subView || "upload"); // "upload" | "review" | "metadata"
   const [imgDimensions, setImgDimensions] = useState(null);
 
   // Upload & Review state
@@ -37,10 +73,14 @@ export default function Tab1Upload({ userId, username }) {
   const [formData, setFormData] = useState(getInitialMetadataForm());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  const [nextSerial, setNextSerial] = useState(1);
+  const [zoomImageUrl, setZoomImageUrl] = useState(null);
 
   useEffect(() => {
     loadDropdowns();
     loadPendingQueue();
+    loadNextSerial();
+
   }, []);
 
   const loadDropdowns = async () => {
@@ -48,8 +88,7 @@ export default function Tab1Upload({ userId, username }) {
       const data = await api.getMasterDropdowns();
       setDropdowns(data);
       if (data.main_categories?.length > 0) {
-        setFormData((prev) => ({ ...prev, main_category: data.main_categories[0] }));
-      }
+setFormData((prev) => ({ ...prev, main_category: prev.main_category || data.main_categories[0] }));      }
     } catch (e) {
       console.error("Could not load dropdown options", e);
     }
@@ -59,13 +98,52 @@ export default function Tab1Upload({ userId, username }) {
     try {
       const data = await api.getPendingProducts();
       setPendingQueue(data);
-      if (data.length > 0 && !selectedQueueItem) {
-        setSelectedQueueItem(data[0]);
+      if (data.length > 0) {
+        const preferredId = savedSession.selectedCropId;
+        const matched = data.find((item) => item.id === preferredId) || data[0];
+        setSelectedQueueItem(matched);
+
+        const drafts = readDrafts();
+        if (drafts[matched.id]) {
+          setFormData(drafts[matched.id].formData);
+          if (drafts[matched.id].mode) setMode(drafts[matched.id].mode);
+        }
       }
     } catch (e) {
       console.error("Could not load pending queue", e);
     }
   };
+
+  // Auto-save active tab step & selected crop ID
+  useEffect(() => {
+    localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        subView,
+        mode,
+        selectedCropId: selectedQueueItem?.id || null,
+      })
+    );
+  }, [subView, mode, selectedQueueItem]);
+
+  // Auto-save current crop's form entries to localStorage
+  useEffect(() => {
+    if (!selectedQueueItem?.id) return;
+    const drafts = readDrafts();
+    drafts[selectedQueueItem.id] = { formData, mode };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  }, [formData, mode, selectedQueueItem]);
+
+  const loadNextSerial = async () => {
+  try {
+    const res = await api.getNextSerial();
+    setNextSerial(res.next_serial || 1);
+  } catch (e) {
+    console.error("Could not load next serial", e);
+  }
+};
+
+
 
   // --- SUB-VIEW 1: FILE UPLOAD ---
   const handleFileUpload = async (e) => {
@@ -187,6 +265,17 @@ export default function Tab1Upload({ userId, username }) {
   // --- SUB-VIEW 3: METADATA SUBMISSION ---
   const handleMetadataSubmit = async () => {
     if (!selectedQueueItem) return;
+    if (mode === "daily") {
+  const missing = REQUIRED_DAILY_FIELDS.filter((f) =>
+    f.isArray ? !formData[f.key]?.length : !String(formData[f.key] ?? "").trim()
+  ).map((f) => f.label);
+
+  if (missing.length > 0) {
+    alert(`Please fill all compulsory fields before saving:\n• ${missing.join("\n• ")}`);
+    return;
+  }
+}
+
     setIsSubmitting(true);
     setSubmitMessage("");
 
@@ -195,6 +284,7 @@ export default function Tab1Upload({ userId, username }) {
         cropped_product_id: selectedQueueItem.id,
         user_id: userId,
         username: username,
+        is_backlog: mode === "backlog",
         ...formData,
         metal_weight: formData.metal_weight ? parseFloat(formData.metal_weight) : null,
         diamond_weight: formData.diamond_weight ? parseFloat(formData.diamond_weight) : null,
@@ -202,12 +292,25 @@ export default function Tab1Upload({ userId, username }) {
         total_weight_2: formData.total_weight_2 ? parseFloat(formData.total_weight_2) : null,
       });
 
-      setSubmitMessage(`Saved: ${result.style_number}`);
+      setSubmitMessage(`Saved: ${result.sketch_number} (${result.style_number})`);
+
+      // Remove saved crop from localStorage drafts
+      const drafts = readDrafts();
+      delete drafts[selectedQueueItem.id];
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
 
       const updatedQueue = pendingQueue.filter((item) => item.id !== selectedQueueItem.id);
+      const nextItem = updatedQueue.length > 0 ? updatedQueue[0] : null;
       setPendingQueue(updatedQueue);
-      setSelectedQueueItem(updatedQueue.length > 0 ? updatedQueue[0] : null);
-      setFormData(getInitialMetadataForm(dropdowns.main_categories?.[0] || ""));
+      setSelectedQueueItem(nextItem);
+
+      if (nextItem && drafts[nextItem.id]) {
+        setFormData(drafts[nextItem.id].formData);
+        if (drafts[nextItem.id].mode) setMode(drafts[nextItem.id].mode);
+      } else {
+        setFormData(getInitialMetadataForm(dropdowns.main_categories?.[0] || ""));
+      }
+      loadNextSerial();
     } catch (err) {
       alert("Error saving metadata: " + err.message);
     } finally {
@@ -271,7 +374,9 @@ export default function Tab1Upload({ userId, username }) {
           <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center text-2xl mb-4 shadow-sm">
             📁
           </div>
-          <h3 className="text-xl font-bold text-slate-900 mb-1">Upload Daily Sketches</h3>
+          <h3 className="text-xl font-bold text-slate-900 mb-1">
+            {mode === "backlog" ? "Upload Backlog Sketches" : "Upload Daily Sketches"}
+          </h3>
           <p className="text-xs text-slate-500 max-w-sm mb-6">
             Supports multi-page PDFs, high-res PNGs, and JPGs. OpenCV will scan and auto-detect individual jewelry sketches.
           </p>
@@ -404,12 +509,19 @@ export default function Tab1Upload({ userId, username }) {
           {/* LEFT SIDEBAR: Queue & Preview */}
           <div className="w-72 border-r border-slate-200 bg-slate-50/50 p-4 flex flex-col shrink-0">
             {selectedQueueItem ? (
-              <div className="h-44 bg-white border border-slate-200 rounded-xl flex flex-col items-center justify-center p-2 mb-3 shadow-inner">
+              <div
+                onClick={() => setZoomImageUrl(getImageUrl(selectedQueueItem.image_url))}
+                title="Click to zoom"
+                className="relative group h-44 bg-white border border-slate-200 rounded-xl flex flex-col items-center justify-center p-2 mb-3 shadow-inner cursor-zoom-in overflow-hidden"
+              >
                 <img
                   src={getImageUrl(selectedQueueItem.image_url)}
                   alt="Preview"
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-contain group-hover:scale-105 transition-transform"
                 />
+                <span className="absolute bottom-2 right-2 bg-slate-900/75 text-white text-[10px] font-semibold px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition">
+                  🔍 Click to Zoom
+                </span>
               </div>
             ) : (
               <div className="h-44 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-xs mb-3">
@@ -432,7 +544,13 @@ export default function Tab1Upload({ userId, username }) {
                     key={item.id}
                     onClick={() => {
                       setSelectedQueueItem(item);
-                      setFormData(getInitialMetadataForm(dropdowns.main_categories?.[0] || ""));
+                      const drafts = readDrafts();
+                      if (drafts[item.id]) {
+                        setFormData(drafts[item.id].formData);
+                        if (drafts[item.id].mode) setMode(drafts[item.id].mode);
+                      } else {
+                        setFormData(getInitialMetadataForm(dropdowns.main_categories?.[0] || ""));
+                      }
                     }}
                     className={`w-full rounded-xl border p-2 flex items-center gap-3 text-left transition ${
                       isCurrent ? "border-rose-300 bg-rose-50 shadow-sm" : "border-slate-200 bg-white hover:bg-slate-50"
@@ -457,10 +575,42 @@ export default function Tab1Upload({ userId, username }) {
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
             {selectedQueueItem ? (
               <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-3">
-                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-2.5">
                   <div>
-                    <h2 className="text-sm font-bold text-slate-900">Technical Cockpit Metadata Entry</h2>
-                    <p className="text-[11px] text-slate-500">Pill selections populated directly from database records.</p>
+                    <h2 className="text-sm font-bold text-slate-900">
+                      {mode === "backlog"
+                        ? "Backlog Metadata Entry (Optional Fields)"
+                        : "New Sketch Metadata Entry (Compulsory Fields)"}
+                    </h2>
+                    <p className="text-[11px] text-slate-500">
+                      Drafts auto-save locally. Switch type anytime without losing entered fields.
+                    </p>
+                  </div>
+
+                  {/* Backlog vs New Sketch Toggle */}
+                  <div className="flex items-center rounded-xl border border-slate-200 bg-slate-100 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setMode("backlog")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        mode === "backlog"
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      Backlog Sketch
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode("daily")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        mode === "daily"
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      New Sketch
+                    </button>
                   </div>
                 </div>
 
@@ -468,7 +618,8 @@ export default function Tab1Upload({ userId, username }) {
                   formData={formData}
                   setFormData={setFormData}
                   dropdowns={dropdowns}
-                  sketchPlaceholder={`SK-${selectedQueueItem.id}`}
+                  nextSerial={nextSerial}
+                  mode={mode}
                 />
               </div>
             ) : (
@@ -494,6 +645,12 @@ export default function Tab1Upload({ userId, username }) {
           </div>
         </div>
       )}
+
+      <ImageZoomModal
+        imageUrl={zoomImageUrl}
+        title={selectedQueueItem ? `Crop #${selectedQueueItem.id} (Page ${selectedQueueItem.page_number})` : "Sketch Preview"}
+        onClose={() => setZoomImageUrl(null)}
+      />
     </div>
   );
 }

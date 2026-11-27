@@ -22,3 +22,12 @@ python-jose[cryptography]>=3.3.0
 # Image Similarity / Feature Extraction (Lightweight)
 torch>=2.2.0
 torchvision>=0.17.0
+
+passlib[bcrypt]
+bcrypt
+pymupdf
+transformers
+safetensors
+sentencepiece
+protobuf
+

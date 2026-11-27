@@ -1,8 +1,10 @@
 # backend/app/database/models.py
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text, JSON , Table , LargeBinary
 from sqlalchemy.orm import relationship
-from datetime import datetime , timezone
+from datetime import datetime , timezone , date
 from .database import Base
+from sqlalchemy import Date , DateTime
+
 # --- 1. USER AUTHENTICATION & ROLES ---
 
 class Role(Base):
@@ -51,12 +53,14 @@ class MainCategory(Base):
     __tablename__ = "main_categories"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True)
+    short_code = Column(String(20), nullable=True)  # e.g., Ring -> R, Earring -> E
 
 class Category(Base):
     __tablename__ = "categories"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     main_category_id = Column(Integer, ForeignKey("main_categories.id"))
+    short_code = Column(String(20), nullable=True)  # e.g., HP
 
 class Subcategory1(Base):
     __tablename__ = "subcategories_1"
@@ -156,7 +160,7 @@ class ProductMetadata(Base):
     cropped_product_id = Column(Integer, ForeignKey("cropped_products.id"), unique=True)
 
     # 1. Identity, Initiation & Designers
-    sketch_number = Column(String(100), nullable=True)
+    sketch_number = Column(String(100), unique=True, index=True, nullable=True)
     style_number = Column(String(100), index=True, nullable=False)
     initiation_type = Column(String(50), default="Internal")        # Internal / Customer
     initiation_trigger = Column(String(100), nullable=True)        # Merchandiser, BDM, etc.
@@ -190,6 +194,7 @@ class ProductMetadata(Base):
     customer_number = Column(String(100), nullable=True)
     market = Column(String(50), nullable=True)
     is_exclusive = Column(Boolean, default=False)
+    is_backlog = Column(Boolean, default=False)
 
     # 6. Collection Context & Team Notes
     collection = Column(String(200), nullable=True)
@@ -205,12 +210,25 @@ class ProductMetadata(Base):
     cropped_product = relationship("CroppedProduct", back_populates="product_metadata")
     attachments = relationship("ProductAttachment", back_populates="product", cascade="all, delete-orphan")
 
+    serial_number = Column(Integer, nullable=True, index=True)
+    sketch_date = Column(Date, default=date.today, nullable=False)
+    grade = Column(String(20), nullable=True)  # Easy, Medium, Hard
+
+
 
 
 class Customer(Base):
     __tablename__ = "customers"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False)
+    
+class CustomerNumber(Base):
+    __tablename__ = "customer_numbers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    
+      
+
 # --- 6. PRODUCTION FILE ATTACHMENTS (Section 7 Views) ---
 
 class ProductAttachment(Base):
@@ -245,7 +263,7 @@ class ProductEmbedding(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     cropped_product_id = Column(Integer, ForeignKey("cropped_products.id", ondelete="CASCADE"), unique=True)
-    embedding_vector = Column(LargeBinary, nullable=False)  # Serialized 512-dim float32 NumPy array (compact & fast)
+    embedding_vector = Column(LargeBinary, nullable=False) 
     model_version = Column(String(50), default="resnet50-v1")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -6,12 +6,13 @@ import TextualSearch from "./components/tabs/TextualSearch";
 import ImageSimilarity from "./components/tabs/ImageSimilarity";
 import ProductivityReport from "./components/tabs/ProductivityReport";
 import LogsViewer from "./components/tabs/LogsViewer";
+import MasterManager from "./components/tabs/MasterManager";
 
 const TABS = [
-  "New Sketch Upload",
-  "Backlog Upload",
+  "Sketch Upload",
   "Textual Search",
   "Image Similarity",
+  "Master Data",
   "Productivity Report",
   "Logs",
   "My Profile",
@@ -19,7 +20,7 @@ const TABS = [
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("New Sketch Upload");
+  const [activeTab, setActiveTab] = useState("Sketch Upload");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -41,7 +42,7 @@ export default function App() {
       const data = await api.login(username, password);
       setUser(data);
       localStorage.setItem("sketchbank_user", JSON.stringify(data));
-      setActiveTab("New Sketch Upload");
+      setActiveTab("Sketch Upload");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -128,7 +129,7 @@ export default function App() {
       />
 
       <main className="flex-1 max-w-[1700px] w-full mx-auto p-6 flex flex-col">
-        {activeTab === "New Sketch Upload" ? (
+        {activeTab === "Sketch Upload" ? (
           <Tab1Upload userId={user.user_id} username={user.username} />
         ) : activeTab === "Textual Search" ? (
           <TextualSearch userId={user.user_id} username={user.username} />
@@ -138,7 +139,9 @@ export default function App() {
           <ProductivityReport />
         ) : activeTab === "Logs" ? (
           <LogsViewer />
-        ) : activeTab === "My Profile" ? (
+        ): activeTab === "Master Data" ? (
+          <MasterManager />
+        ): activeTab === "My Profile" ? (
           <div className="max-w-md mx-auto w-full bg-white border border-slate-200 rounded-2xl p-8 space-y-6 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>

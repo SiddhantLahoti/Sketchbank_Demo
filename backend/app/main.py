@@ -10,11 +10,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import database, models
-from .routers import auth, ingestion, metadata , search , logs , reports , similarity
+from .routers import auth, ingestion, metadata , search , logs , reports , similarity , masters
 models.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="Jewelry OS API")
-
+@app.on_event("startup")
+def warmup_models():
+    from .services.embedding_service import get_siglip2
+    get_siglip2()
+    
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,6 +39,7 @@ app.include_router(search.router)
 app.include_router(logs.router)   
 app.include_router(reports.router)  
 app.include_router(similarity.router)
+app.include_router(masters.router)
 
 FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend/dist"))
 if os.path.exists(FRONTEND_DIST):

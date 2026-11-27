@@ -33,7 +33,7 @@ export default function TextualSearch({ userId, username }) {
     colour_stones: [],
     markets: [],
     designers: [],
-    customers: [],
+    customer_numbers: [],
   });
 
   // Edit Modal State
@@ -289,7 +289,7 @@ export default function TextualSearch({ userId, username }) {
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Customer</label>
           <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-            {dropdowns.customers.map((c) => (
+            {dropdowns.customer_numbers.map((c) => (
               <button
                 key={c}
                 onClick={() => setSelectedCustomer(c === selectedCustomer ? "" : c)}
@@ -442,6 +442,7 @@ export default function TextualSearch({ userId, username }) {
                 setFormData={setEditForm}
                 dropdowns={dropdowns}
                 sketchPlaceholder={editingProduct.sketch_number}
+                isEditMode={true}
               />
             </div>
 
